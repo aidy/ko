@@ -42,7 +42,10 @@ import (
 	"github.com/google/ko/pkg/build"
 	"github.com/google/ko/pkg/commands/options"
 	kotesting "github.com/google/ko/pkg/internal/testing"
+	"github.com/google/ko/pkg/publish/kind"
+	"github.com/google/ko/testutil"
 	"gopkg.in/yaml.v3"
+	"sigs.k8s.io/kind/pkg/cluster/nodes"
 )
 
 var (
@@ -311,6 +314,29 @@ func TestNewPublisherCanPublish(t *testing.T) {
 				t.Errorf("got %s, wanted %s", gotImageName, test.wantImageName)
 			}
 		})
+	}
+}
+
+func TestNewKindPublisher(t *testing.T) {
+	importpath := "ko://github.com/google/ko/test"
+	n := &testutil.FakeNode{}
+	kind.GetProvider = func() kind.Provider {
+		return &testutil.FakeProvider{Nodes: []nodes.Node{n}}
+	}
+	publisher, err := NewPublisher(&options.PublishOptions{
+		DockerRepo: "kind.local/foo",
+		Bare:       true,
+	})
+	if err != nil {
+		t.Fatalf("NewPublisher(): %v", err)
+	}
+	defer publisher.Close()
+	ref, err := publisher.Publish(context.Background(), empty.Image, build.StrictScheme+importpath)
+	if err != nil {
+		t.Fatalf("publisher.Publish(): %v", err)
+	}
+	if !strings.HasPrefix(ref.String(), "kind.local/foo:") {
+		t.Errorf("got %s, wanted kind.local/foo:*", ref)
 	}
 }
 
