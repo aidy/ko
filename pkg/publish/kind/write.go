@@ -34,13 +34,13 @@ import (
 // Supported since kind 0.8.0 (https://github.com/kubernetes-sigs/kind/releases/tag/v0.8.0)
 const clusterNameEnvKey = "KIND_CLUSTER_NAME"
 
-// provider is an interface for kind providers to facilitate testing.
-type provider interface {
+// Provider is an interface for kind providers to facilitate testing.
+type Provider interface {
 	ListInternalNodes(name string) ([]nodes.Node, error)
 }
 
 // GetProvider is a variable so we can override in tests.
-var GetProvider = func() provider {
+var GetProvider = func() Provider {
 	return cluster.NewProvider()
 }
 

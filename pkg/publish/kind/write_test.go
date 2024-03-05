@@ -18,15 +18,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"io/ioutil"
-	"strings"
 	"testing"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/random"
+	"github.com/google/ko/testutil"
 	"sigs.k8s.io/kind/pkg/cluster/nodes"
-	"sigs.k8s.io/kind/pkg/exec"
 )
 
 func TestWrite(t *testing.T) {
@@ -41,10 +38,10 @@ func TestWrite(t *testing.T) {
 		t.Fatalf("name.NewTag() = %v", err)
 	}
 
-	n1 := &fakeNode{}
-	n2 := &fakeNode{}
-	GetProvider = func() provider {
-		return &fakeProvider{nodes: []nodes.Node{n1, n2}}
+	n1 := &testutil.FakeNode{}
+	n2 := &testutil.FakeNode{}
+	GetProvider = func() Provider {
+		return &testutil.FakeProvider{Nodes: []nodes.Node{n1, n2}}
 	}
 
 	if err := Write(ctx, tag, img); err != nil {
@@ -52,13 +49,13 @@ func TestWrite(t *testing.T) {
 	}
 
 	// Verify the respective command is executed on each node.
-	for _, n := range []*fakeNode{n1, n2} {
-		if got, want := len(n.cmds), 1; got != want {
+	for _, n := range []*testutil.FakeNode{n1, n2} {
+		if got, want := len(n.Cmds), 1; got != want {
 			t.Fatalf("len(n.cmds) = %d, want %d", got, want)
 		}
-		c := n.cmds[0]
+		c := n.Cmds[0]
 
-		if got, want := c.cmd, "ctr --namespace=k8s.io images import -"; got != want {
+		if got, want := c.Cmd, "ctr --namespace=k8s.io images import -"; got != want {
 			t.Fatalf("c.cmd = %s, want %s", got, want)
 		}
 	}
@@ -76,10 +73,10 @@ func TestTag(t *testing.T) {
 		t.Fatalf("name.NewTag() = %v", err)
 	}
 
-	n1 := &fakeNode{}
-	n2 := &fakeNode{}
-	GetProvider = func() provider {
-		return &fakeProvider{nodes: []nodes.Node{n1, n2}}
+	n1 := &testutil.FakeNode{}
+	n2 := &testutil.FakeNode{}
+	GetProvider = func() Provider {
+		return &testutil.FakeProvider{Nodes: []nodes.Node{n1, n2}}
 	}
 
 	if err := Tag(ctx, oldTag, newTag); err != nil {
@@ -87,13 +84,13 @@ func TestTag(t *testing.T) {
 	}
 
 	// Verify the respective command is executed on each node.
-	for _, n := range []*fakeNode{n1, n2} {
-		if got, want := len(n.cmds), 1; got != want {
+	for _, n := range []*testutil.FakeNode{n1, n2} {
+		if got, want := len(n.Cmds), 1; got != want {
 			t.Fatalf("len(n.cmds) = %d, want %d", got, want)
 		}
-		c := n.cmds[0]
+		c := n.Cmds[0]
 
-		if got, want := c.cmd, fmt.Sprintf("ctr --namespace=k8s.io images tag --force %s %s", oldTag, newTag); got != want {
+		if got, want := c.Cmd, fmt.Sprintf("ctr --namespace=k8s.io images tag --force %s %s", oldTag, newTag); got != want {
 			t.Fatalf("c.cmd = %s, want %s", got, want)
 		}
 	}
@@ -116,8 +113,8 @@ func TestFailWithNoNodes(t *testing.T) {
 		t.Fatalf("name.NewTag() = %v", err)
 	}
 
-	GetProvider = func() provider {
-		return &fakeProvider{}
+	GetProvider = func() Provider {
+		return &testutil.FakeProvider{}
 	}
 
 	if err := Write(ctx, newTag, img); err == nil {
@@ -147,10 +144,10 @@ func TestFailCommands(t *testing.T) {
 
 	errTest := errors.New("test")
 
-	n1 := &fakeNode{err: errTest}
-	n2 := &fakeNode{err: errTest}
-	GetProvider = func() provider {
-		return &fakeProvider{nodes: []nodes.Node{n1, n2}}
+	n1 := &testutil.FakeNode{Err: errTest}
+	n2 := &testutil.FakeNode{Err: errTest}
+	GetProvider = func() Provider {
+		return &testutil.FakeProvider{Nodes: []nodes.Node{n1, n2}}
 	}
 
 	if err := Write(ctx, newTag, img); !errors.Is(err, errTest) {
@@ -160,60 +157,3 @@ func TestFailCommands(t *testing.T) {
 		t.Fatalf("Write() = %v, want %v", err, errTest)
 	}
 }
-
-// fakeProvider
-type fakeProvider struct {
-	nodes []nodes.Node
-}
-
-func (f *fakeProvider) ListInternalNodes(name string) ([]nodes.Node, error) {
-	return f.nodes, nil
-}
-
-type fakeNode struct {
-	cmds []*fakeCmd
-	err  error
-}
-
-func (f *fakeNode) CommandContext(ctx context.Context, cmd string, args ...string) exec.Cmd {
-	command := &fakeCmd{
-		cmd: strings.Join(append([]string{cmd}, args...), " "),
-		err: f.err,
-	}
-	f.cmds = append(f.cmds, command)
-	return command
-}
-
-func (f *fakeNode) String() string {
-	return "test"
-}
-
-// The following functions are not used by our code at all.
-func (f *fakeNode) Command(string, ...string) exec.Cmd        { return nil }
-func (f *fakeNode) Role() (string, error)                     { return "", nil }
-func (f *fakeNode) IP() (ipv4 string, ipv6 string, err error) { return "", "", nil }
-func (f *fakeNode) SerialLogs(writer io.Writer) error         { return nil }
-
-type fakeCmd struct {
-	cmd   string
-	err   error
-	stdin io.Reader
-}
-
-func (f *fakeCmd) Run() error {
-	if f.stdin != nil {
-		// Consume the entire stdin to move the image publish forward.
-		ioutil.ReadAll(f.stdin)
-	}
-	return f.err
-}
-
-func (f *fakeCmd) SetStdin(stdin io.Reader) exec.Cmd {
-	f.stdin = stdin
-	return f
-}
-
-// The following functions are not used by our code at all.
-func (f *fakeCmd) SetEnv(...string) exec.Cmd    { return f }
-func (f *fakeCmd) SetStdout(io.Writer) exec.Cmd { return f }
-func (f *fakeCmd) SetStderr(io.Writer) exec.Cmd { return f }
